@@ -80,8 +80,6 @@ function getPitch() {
         }
 
         if (frequency) {
-            // *** THE FIX IS HERE ***
-            // We now call our own custom freqToMidi function.
             const midiNum = freqToMidi(frequency); 
             const noteName = midiToNoteName(midiNum);
             statusDiv.textContent = `Detected Note: ${noteName} (Frequency: ${frequency.toFixed(2)} Hz)`;
@@ -120,52 +118,83 @@ function processAndDrawNotes() {
     drawVexflowNotes();
 }
 
-// --- VexFlow Drawing Function ---
+
+// ===================================================================
+// === THIS IS THE UPDATED AND CORRECTED FUNCTION ===
+// ===================================================================
+
 function drawVexflowNotes() {
-    const { Renderer, Stave, StaveNote, Formatter, Voice } = Vex.Flow;
+    const { Renderer, Stave, StaveNote, Formatter, Voice, Accidental } = Vex.Flow;
+
+    // Clear any previous rendering
     sheetMusicDiv.innerHTML = '';
-    const requiredWidth = detectedNotes.length * 60 + 120;
-    const renderer = new Renderer(sheetMusicDiv, Renderer.Backends.SVG);
-    renderer.resize(requiredWidth, 150);
-    const context = renderer.getContext();
-    const stave = new Stave(10, 40, requiredWidth - 20);
-    stave.addClef('treble').addTimeSignature('4/4');
-    stave.setContext(context).draw();
-    const vexNotes = detectedNotes.map(item => {
-        const note = new StaveNote({
-            keys: [item.note.toLowerCase()],
-            duration: item.duration,
+    
+    // Exit if no notes are detected
+    if (detectedNotes.length === 0) return;
+
+    // --- 1. Group notes into measures ---
+    const notesPerMeasure = 4; // Because we are in 4/4 and all notes are quarter notes
+    const measures = [];
+    for (let i = 0; i < detectedNotes.length; i += notesPerMeasure) {
+        const chunk = detectedNotes.slice(i, i + notesPerMeasure);
+        measures.push(chunk);
+    }
+    
+    // --- 2. Create VexFlow StaveNotes and add accidentals ---
+    const vexMeasures = measures.map(measure => {
+        return measure.map(item => {
+            const noteKey = item.note.toLowerCase();
+            const staveNote = new StaveNote({
+                keys: [noteKey],
+                duration: item.duration,
+            });
+            // If the note has a sharp or flat, add it as an "accidental"
+            if (noteKey.includes('#')) {
+                staveNote.addAccidental(0, new Accidental('#'));
+            }
+            if (noteKey.includes('b')) {
+                staveNote.addAccidental(0, new Accidental('b'));
+            }
+            return staveNote;
         });
-        if (item.note.includes('#')) {
-            note.addAccidental(0, new Vex.Flow.Accidental('#'));
-        }
-        return note;
     });
-    const voice = new Voice({ num_beats: detectedNotes.length, beat_value: 4 });
-    voice.addTickables(vexNotes);
-    new Formatter().joinVoices([voice]).format([voice], requiredWidth - 100);
-    voice.draw(context, stave);
+
+    // --- 3. Draw each measure one by one ---
+    const renderer = new Renderer(sheetMusicDiv, Renderer.Backends.SVG);
+    const staveWidth = 250; // The width of a single measure
+    renderer.resize(staveWidth * vexMeasures.length + 50, 150); // Total width needed
+    const context = renderer.getContext();
+    let currentX = 10; // Starting X position for the first stave
+
+    vexMeasures.forEach((notes, index) => {
+        const stave = new Stave(currentX, 40, staveWidth);
+        // Add clef and time signature to the first measure only
+        if (index === 0) {
+            stave.addClef('treble').addTimeSignature('4/4');
+        }
+        
+        stave.setContext(context).draw();
+
+        // Create a voice for the current measure
+        const voice = new Voice({ num_beats: notes.length, beat_value: 4 });
+        voice.addTickables(notes);
+
+        // Format and draw the voice
+        new Formatter().joinVoices([voice]).format([voice], staveWidth - 20);
+        voice.draw(context, stave);
+        
+        // Move the X position for the next stave
+        currentX += staveWidth;
+    });
 }
 
 // --- Helper Functions ---
 
-/**
- * Converts a frequency in Hz to a MIDI note number.
- * @param {number} frequency The frequency in Hz.
- * @returns {number} The corresponding MIDI note number.
- */
 function freqToMidi(frequency) {
-    // The formula to convert frequency to a MIDI note number is:
-    // MIDI = 69 + 12 * log2(frequency / 440)
     const midi = 69 + 12 * Math.log2(frequency / 440);
-    return Math.round(midi); // We round to the nearest whole number for the note
+    return Math.round(midi);
 }
 
-/**
- * Converts a MIDI number to a standard note name (e.g., 69 -> "A/4").
- * @param {number} midi The MIDI note number.
- * @returns {string} The note name string.
- */
 function midiToNoteName(midi) {
     const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     const octave = Math.floor(midi / 12) - 1;
