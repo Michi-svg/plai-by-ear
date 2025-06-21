@@ -27,7 +27,7 @@ function toggleListening() {
 }
 
 async function startListening() {
-    if (isListening || !startButton.disabled === false) return;
+    if (isListening || startButton.disabled) return;
 
     startButton.disabled = true;
     startButton.textContent = 'Initializing...';
@@ -40,10 +40,11 @@ async function startListening() {
         }
 
         statusDiv.textContent = 'Please allow microphone access...';
-        mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        mic = stream; // Save the stream to stop it later
 
         statusDiv.textContent = 'Loading machine learning model...';
-        pitch = await ml5.pitchDetection(modelURL, audioContext, mic, modelLoaded);
+        pitch = await ml5.pitchDetection(modelURL, audioContext, stream, modelLoaded);
 
     } catch (error) {
         console.error("Failed to start listening:", error);
@@ -80,15 +81,17 @@ function getPitch() {
         }
 
         if (frequency) {
-            const midiNum = freqToMidi(frequency); 
+            const midiNum = freqToMidi(frequency);
             const noteName = midiToNoteName(midiNum);
             statusDiv.textContent = `Detected Note: ${noteName} (Frequency: ${frequency.toFixed(2)} Hz)`;
 
+            // Add note only if it's different from the last one to avoid duplicates
             if (detectedNotes.length === 0 || detectedNotes[detectedNotes.length - 1].note !== noteName) {
-                detectedNotes.push({ note: noteName, duration: "q" });
+                detectedNotes.push({ note: noteName, duration: "q" }); // 'q' for quarter note
             }
         }
 
+        // Keep listening
         requestAnimationFrame(getPitch);
     });
 }
@@ -98,8 +101,13 @@ function stopListening() {
 
     isListening = false;
 
+    // Stop the microphone track
     if (mic) {
         mic.getTracks().forEach(track => track.stop());
+    }
+    // Close the audio context to release resources
+    if (audioContext && audioContext.state !== 'closed') {
+        audioContext.close();
     }
 
     startButton.textContent = 'Start Listening';
@@ -112,23 +120,28 @@ function stopListening() {
 function processAndDrawNotes() {
     if (detectedNotes.length === 0) {
         statusDiv.textContent = 'No notes were detected. Try singing more clearly!';
+        sheetMusicDiv.innerHTML = ''; // Clear the area
         return;
     }
     statusDiv.textContent = `Generated sheet music with ${detectedNotes.length} notes.`;
     drawVexflowNotes();
 }
 
-
 // ===================================================================
 // === THIS IS THE UPDATED AND CORRECTED FUNCTION ===
 // ===================================================================
-
 function drawVexflowNotes() {
-    const { Renderer, Stave, StaveNote, Formatter, Voice, Accidental } = Vex.Flow;
+    // Make sure Vex is available
+    if (typeof Vex === 'undefined') {
+        statusDiv.textContent = "Error: VexFlow library not loaded.";
+        return;
+    }
+
+    const { Renderer, Stave, StaveNote, Formatter, Voice } = Vex.Flow;
 
     // Clear any previous rendering
     sheetMusicDiv.innerHTML = '';
-    
+
     // Exit if no notes are detected
     if (detectedNotes.length === 0) return;
 
@@ -136,60 +149,53 @@ function drawVexflowNotes() {
     const notesPerMeasure = 4; // Because we are in 4/4 and all notes are quarter notes
     const measures = [];
     for (let i = 0; i < detectedNotes.length; i += notesPerMeasure) {
-        const chunk = detectedNotes.slice(i, i + notesPerMeasure);
-        measures.push(chunk);
+        measures.push(detectedNotes.slice(i, i + notesPerMeasure));
     }
-    
-    // --- 2. Create VexFlow StaveNotes and add accidentals ---
+
+    // --- 2. Create VexFlow StaveNotes ---
     const vexMeasures = measures.map(measure => {
         return measure.map(item => {
+            // VexFlow expects lowercase note names, e.g., "c#/4" instead of "C#/4"
             const noteKey = item.note.toLowerCase();
-            const staveNote = new StaveNote({
+            return new StaveNote({
                 keys: [noteKey],
                 duration: item.duration,
+                auto_stem: true // Automatically determine stem direction
             });
-            // If the note has a sharp or flat, add it as an "accidental"
-            if (noteKey.includes('#')) {
-                staveNote.addAccidental(0, new Accidental('#'));
-            }
-            if (noteKey.includes('b')) {
-                staveNote.addAccidental(0, new Accidental('b'));
-            }
-            return staveNote;
         });
     });
 
-    // --- 3. Draw each measure one by one ---
+    // --- 3. Draw each measure ---
+    const totalWidth = vexMeasures.length * 250 + 80; // Calculate width needed for all measures
     const renderer = new Renderer(sheetMusicDiv, Renderer.Backends.SVG);
-    const staveWidth = 250; // The width of a single measure
-    renderer.resize(staveWidth * vexMeasures.length + 50, 150); // Total width needed
+    renderer.resize(totalWidth, 150);
     const context = renderer.getContext();
-    let currentX = 10; // Starting X position for the first stave
+    let currentX = 0;
 
     vexMeasures.forEach((notes, index) => {
-        const stave = new Stave(currentX, 40, staveWidth);
+        const stave = new Stave(currentX, 40, 250);
         // Add clef and time signature to the first measure only
         if (index === 0) {
             stave.addClef('treble').addTimeSignature('4/4');
         }
-        
+
         stave.setContext(context).draw();
 
-        // Create a voice for the current measure
+        // Create a voice for the current measure's notes
         const voice = new Voice({ num_beats: notes.length, beat_value: 4 });
         voice.addTickables(notes);
 
         // Format and draw the voice
-        new Formatter().joinVoices([voice]).format([voice], staveWidth - 20);
+        new Formatter().joinVoices([voice]).format([voice], 200); // 200 is formatting width
         voice.draw(context, stave);
-        
+
         // Move the X position for the next stave
-        currentX += staveWidth;
+        currentX += stave.getWidth();
     });
 }
 
-// --- Helper Functions ---
 
+// --- Helper Functions ---
 function freqToMidi(frequency) {
     const midi = 69 + 12 * Math.log2(frequency / 440);
     return Math.round(midi);
