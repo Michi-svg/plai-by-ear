@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TuneScribe - Mic to Music Sheet</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <h1>TuneScribe 🎵</h1>
+        <p class="subtitle">Sing or play an instrument, and see the notes appear!</p>
+
+        <div class="controls">
+            <button id="startButton">Start Listening</button>
+        </div>
+
+        <div id="status">
+            Awaiting instructions...
+        </div>
+
+        <div class="sheet-music-container">
+            <!-- VexFlow will render the sheet music here -->
+            <div id="sheet-music"></div>
+        </div>
+    </div>
+
+    <!-- Required Libraries -->
+    <!-- VexFlow for rendering notation -->
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.0/build/vexflow-min.js"></script>
+    <!-- ml5.js for pitch detection -->
+    <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+    
+    <!-- Our main script -->
+    <script src="script.js"></script>
+</body>
+</html>
