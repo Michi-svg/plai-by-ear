@@ -3,7 +3,6 @@ let audioContext;
 let mic;
 let pitch;
 let isListening = false;
-let modelReady = false;
 
 let detectedNotes = [];
 
@@ -29,22 +28,19 @@ function toggleListening() {
 
 async function startListening() {
     if (isListening || !startButton.disabled === false) return;
-    console.log("%cStarting listening process...", "color: blue; font-weight: bold;"); // --- DEBUGGING ---
 
     startButton.disabled = true;
     startButton.textContent = 'Initializing...';
     statusDiv.textContent = 'Starting audio context...';
-    
+
     try {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') {
             await audioContext.resume();
         }
-        console.log("AudioContext is ready.", audioContext); // --- DEBUGGING ---
 
         statusDiv.textContent = 'Please allow microphone access...';
         mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        console.log("Microphone access granted.", mic); // --- DEBUGGING ---
 
         statusDiv.textContent = 'Loading machine learning model...';
         pitch = await ml5.pitchDetection(modelURL, audioContext, mic, modelLoaded);
@@ -58,7 +54,6 @@ async function startListening() {
 }
 
 function modelLoaded() {
-    console.log("%cModel loaded successfully!", "color: green; font-weight: bold;"); // --- DEBUGGING ---
     statusDiv.textContent = 'Model loaded! Listening for notes...';
     isListening = true;
     startButton.disabled = false;
@@ -77,10 +72,6 @@ function getPitch() {
             return;
         }
 
-        // --- THE MOST IMPORTANT DEBUGGING LINE ---
-        // This will show us what the model is hearing on every frame.
-        console.log(`getPitch running. Frequency: ${frequency}`);
-
         if (err) {
             console.error(err);
             statusDiv.textContent = 'An error occurred during pitch detection.';
@@ -89,26 +80,26 @@ function getPitch() {
         }
 
         if (frequency) {
-            const midiNum = ml5.freqToMidi(frequency);
+            // *** THE FIX IS HERE ***
+            // We now call our own custom freqToMidi function.
+            const midiNum = freqToMidi(frequency); 
             const noteName = midiToNoteName(midiNum);
             statusDiv.textContent = `Detected Note: ${noteName} (Frequency: ${frequency.toFixed(2)} Hz)`;
 
             if (detectedNotes.length === 0 || detectedNotes[detectedNotes.length - 1].note !== noteName) {
-                console.log(`%cNOTE PUSHED: ${noteName}`, "color: purple;"); // --- DEBUGGING ---
                 detectedNotes.push({ note: noteName, duration: "q" });
             }
         }
-        
+
         requestAnimationFrame(getPitch);
     });
 }
 
 function stopListening() {
     if (!isListening) return;
-    console.log("%cStopping listening process...", "color: red; font-weight: bold;"); // --- DEBUGGING ---
 
     isListening = false;
-    
+
     if (mic) {
         mic.getTracks().forEach(track => track.stop());
     }
@@ -121,18 +112,15 @@ function stopListening() {
 }
 
 function processAndDrawNotes() {
-    console.log("Final detected notes array:", detectedNotes); // --- DEBUGGING ---
     if (detectedNotes.length === 0) {
-        statusDiv.textContent = 'No notes were detected. Check console for frequency logs.';
+        statusDiv.textContent = 'No notes were detected. Try singing more clearly!';
         return;
     }
     statusDiv.textContent = `Generated sheet music with ${detectedNotes.length} notes.`;
     drawVexflowNotes();
 }
 
-// (The rest of the file - drawVexflowNotes and midiToNoteName - remains the same)
-// ... paste the drawVexflowNotes and midiToNoteName functions from the previous version here ...
-
+// --- VexFlow Drawing Function ---
 function drawVexflowNotes() {
     const { Renderer, Stave, StaveNote, Formatter, Voice } = Vex.Flow;
     sheetMusicDiv.innerHTML = '';
@@ -159,6 +147,25 @@ function drawVexflowNotes() {
     voice.draw(context, stave);
 }
 
+// --- Helper Functions ---
+
+/**
+ * Converts a frequency in Hz to a MIDI note number.
+ * @param {number} frequency The frequency in Hz.
+ * @returns {number} The corresponding MIDI note number.
+ */
+function freqToMidi(frequency) {
+    // The formula to convert frequency to a MIDI note number is:
+    // MIDI = 69 + 12 * log2(frequency / 440)
+    const midi = 69 + 12 * Math.log2(frequency / 440);
+    return Math.round(midi); // We round to the nearest whole number for the note
+}
+
+/**
+ * Converts a MIDI number to a standard note name (e.g., 69 -> "A/4").
+ * @param {number} midi The MIDI note number.
+ * @returns {string} The note name string.
+ */
 function midiToNoteName(midi) {
     const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     const octave = Math.floor(midi / 12) - 1;
